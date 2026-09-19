@@ -2,6 +2,7 @@ export { JevClient, noul, choice, score, type JevClientOptions } from "./client.
 export {
   OpenRouterProvider,
   TypeSafeProvider,
+  VercelGatewayProvider,
   MockProvider,
   type Provider,
 } from "./providers.ts";

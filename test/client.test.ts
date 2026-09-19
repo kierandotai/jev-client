@@ -1,7 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { JevClient, noul, choice, score } from "../src/client.ts";
-import { MockProvider, OpenRouterProvider, normalize } from "../src/providers.ts";
+import {
+  MockProvider,
+  OpenRouterProvider,
+  VercelGatewayProvider,
+  normalize,
+} from "../src/providers.ts";
 import { escalateIfUnsure } from "../src/helpers.ts";
 import { estimateCostUsd, JevError } from "../src/types.ts";
 
@@ -97,5 +102,78 @@ test("openrouter provider retries 429 then succeeds (stubbed fetch)", async () =
     assert.equal(raw.usage.input_tokens, 42);
   } finally {
     globalThis.fetch = original;
+  }
+});
+
+test("vercel gateway provider translates dialect both directions (stubbed fetch)", async () => {
+  const original = globalThis.fetch;
+  let captured: { url: string; headers: Record<string, string>; body: unknown } | null = null;
+  globalThis.fetch = (async (url: unknown, init: unknown) => {
+    const i = init as { headers: Record<string, string>; body: string };
+    captured = { url: String(url), headers: i.headers, body: JSON.parse(i.body) };
+    return Response.json({
+      answers: {
+        urgent: { type: "boolean", probability: 0.85 },
+        dept: { type: "choice", choice: "billing", probabilities: { billing: 1, technical: 0 } },
+        anger: { type: "score", score: 2, probabilities: { "0": 0, "1": 0, "2": 1 } },
+      },
+      usage: { inputTokens: 392, outputTokens: 61 },
+      providerMetadata: { typesafe: { confidence: { dept: 1, anger: 0.9 } } },
+    });
+  }) as typeof fetch;
+  try {
+    const provider = new VercelGatewayProvider("test-key");
+    const raw = await provider.decide({
+      model: "typesafe-ai/jev",
+      state: "s",
+      questions: {
+        urgent: noul("urgent?"),
+        dept: choice("team?", { billing: "money", technical: "bugs" }),
+        anger: score("angry?", ["calm", "annoyed", "furious"]),
+      },
+    });
+    const c = captured!;
+    assert.match(c.url, /\/v4\/ai\/evaluation-model$/);
+    assert.equal(c.headers["ai-model-id"], "typesafe-ai/jev");
+    assert.equal(c.headers["ai-gateway-protocol-version"], "0.0.1");
+    const wire = c.body as { questions: Record<string, { type: string }> };
+    assert.equal(wire.questions.urgent.type, "boolean");
+    assert.equal(wire.questions.dept.type, "choice");
+
+    assert.deepEqual(raw.answers.urgent, { type: "noul", noul: 0.85 });
+    const dept = raw.answers.dept;
+    assert.equal(dept.type === "choice" && dept.choice, "billing");
+    assert.equal(dept.type === "choice" && dept.confidence, 1);
+    const anger = raw.answers.anger;
+    assert.equal(anger.type === "score" && anger.score, 2);
+    assert.equal(anger.type === "score" && anger.confidence, 0.9);
+    assert.deepEqual(anger.type === "score" ? anger.legend : {}, {
+      "0": "calm",
+      "1": "annoyed",
+      "2": "furious",
+    });
+    assert.equal(raw.usage.input_tokens, 392);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("auto provider resolution prefers gateway key, and explicit vercel-gateway works", () => {
+  const prev = { gw: process.env.AI_GATEWAY_API_KEY, or: process.env.OPENROUTER_API_KEY };
+  try {
+    process.env.AI_GATEWAY_API_KEY = "gw-test";
+    process.env.OPENROUTER_API_KEY = "or-test";
+    assert.equal(new JevClient({}).provider.name, "vercel-gateway");
+    delete process.env.AI_GATEWAY_API_KEY;
+    assert.equal(new JevClient({}).provider.name, "openrouter");
+    assert.equal(
+      new JevClient({ provider: "vercel-gateway", gatewayApiKey: "x" }).provider.name,
+      "vercel-gateway",
+    );
+  } finally {
+    if (prev.gw === undefined) delete process.env.AI_GATEWAY_API_KEY;
+    else process.env.AI_GATEWAY_API_KEY = prev.gw;
+    if (prev.or === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = prev.or;
   }
 });
