@@ -21,7 +21,7 @@ export interface RawDecision {
   usage: JevUsage;
 }
 
-const RETRY_STATUSES = new Set([429, 500, 502, 503, 529]);
+const RETRY_STATUSES = new Set([429, 500, 502, 503, 504, 529]);
 const MAX_ATTEMPTS = 4;
 
 /** POST with exponential backoff + jitter on 429/5xx/529, honoring Retry-After. */
