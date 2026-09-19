@@ -28,7 +28,7 @@ const MAX_ATTEMPTS = 4;
 async function postJson(
   url: string,
   apiKey: string,
-  body: JevRequest,
+  body: unknown,
   providerName: string,
   extraHeaders: Record<string, string> = {},
   signal?: AbortSignal,
@@ -93,6 +93,90 @@ export class TypeSafeProvider implements Provider {
   decide(req: JevRequest, signal?: AbortSignal): Promise<RawDecision> {
     return postJson(`${this.#baseUrl}/systemone`, this.#apiKey, req, this.name, {}, signal);
   }
+}
+
+/**
+ * Vercel AI Gateway's evaluation-model surface for Jev (free promo window as
+ * of Sept 2026). Dialect differs from TypeSafe/OpenRouter: the `noul`
+ * primitive is called `boolean` on the wire, confidence arrives in
+ * providerMetadata rather than inline, score answers carry no legend, and
+ * usage is camelCase — this provider translates both directions so callers
+ * see the standard jev-client shapes.
+ */
+export class VercelGatewayProvider implements Provider {
+  readonly name = "vercel-gateway";
+  readonly defaultModel = "typesafe-ai/jev";
+  readonly #apiKey: string;
+  readonly #baseUrl: string;
+  constructor(apiKey: string, baseUrl = "https://ai-gateway.vercel.sh/v4/ai") {
+    this.#apiKey = apiKey;
+    this.#baseUrl = baseUrl;
+  }
+
+  async decide(req: JevRequest, signal?: AbortSignal): Promise<RawDecision> {
+    const wireQuestions: Record<string, unknown> = {};
+    for (const [id, q] of Object.entries(req.questions)) {
+      wireQuestions[id] = q.type === "noul" ? { ...q, type: "boolean" } : q;
+    }
+    const raw = (await postJson(
+      `${this.#baseUrl}/evaluation-model`,
+      this.#apiKey,
+      { state: req.state, questions: wireQuestions },
+      this.name,
+      { "ai-model-id": req.model, "ai-gateway-protocol-version": "0.0.1" },
+      signal,
+    )) as unknown as GatewayEvalResponse;
+
+    const confidences = raw.providerMetadata?.typesafe?.confidence ?? {};
+    const answers: Record<string, JevAnswer> = {};
+    for (const [id, a] of Object.entries(raw.answers)) {
+      answers[id] = translateGatewayAnswer(id, a, req.questions[id], confidences[id]);
+    }
+    return {
+      model: req.model,
+      answers,
+      usage: {
+        input_tokens: raw.usage?.inputTokens ?? 0,
+        output_tokens: raw.usage?.outputTokens ?? 0,
+      },
+    };
+  }
+}
+
+interface GatewayEvalResponse {
+  answers: Record<string, { type: string; probability?: number; choice?: string; score?: number; probabilities?: Record<string, number> }>;
+  usage?: { inputTokens?: number; outputTokens?: number };
+  providerMetadata?: { typesafe?: { confidence?: Record<string, number> } };
+}
+
+function translateGatewayAnswer(
+  id: string,
+  a: GatewayEvalResponse["answers"][string],
+  question: JevQuestion | undefined,
+  confidence: number | undefined,
+): JevAnswer {
+  if (a.type === "boolean") {
+    return { type: "noul", noul: a.probability ?? 0 };
+  }
+  const probabilities = a.probabilities ?? {};
+  const derived = confidence ?? derivedConfidence(probabilities);
+  if (a.type === "choice") {
+    return { type: "choice", choice: a.choice ?? "", probabilities, confidence: derived };
+  }
+  const legend: Record<string, string> = {};
+  if (question?.type === "score") {
+    question.criteria.forEach((c, i) => {
+      legend[String(i)] = typeof c === "string" ? c : JSON.stringify(c);
+    });
+  }
+  return { type: "score", score: a.score ?? 0, legend, probabilities, confidence: derived };
+}
+
+/** Gateway omits confidence for some answers; fall back to top-probability margin. */
+function derivedConfidence(probabilities: Record<string, number>): number {
+  const sorted = Object.values(probabilities).sort((x, y) => y - x);
+  if (sorted.length === 0) return 0;
+  return Math.min(1, sorted[0] + (sorted[0] - (sorted[1] ?? 0)));
 }
 
 /**

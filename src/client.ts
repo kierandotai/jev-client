@@ -2,6 +2,7 @@ import {
   MockProvider,
   OpenRouterProvider,
   TypeSafeProvider,
+  VercelGatewayProvider,
   normalize,
   type Provider,
 } from "./providers.ts";
@@ -22,6 +23,7 @@ export interface JevClientOptions {
   model?: string;
   openrouterApiKey?: string;
   typesafeApiKey?: string;
+  gatewayApiKey?: string;
   /** Warn on stderr when falling back to the mock provider (default true). */
   warnOnMock?: boolean;
 }
@@ -55,6 +57,8 @@ function resolveProvider(opts: JevClientOptions): Provider {
 
   const orKey = opts.openrouterApiKey ?? process.env.OPENROUTER_API_KEY;
   const tsKey = opts.typesafeApiKey ?? process.env.TYPESAFE_API_KEY;
+  const gwKey =
+    opts.gatewayApiKey ?? process.env.AI_GATEWAY_API_KEY ?? process.env.VERCEL_AI_GATEWAY_KEY;
 
   switch (choice) {
     case "openrouter":
@@ -63,9 +67,15 @@ function resolveProvider(opts: JevClientOptions): Provider {
     case "typesafe":
       if (!tsKey) throw new Error("JEV_PROVIDER=typesafe but TYPESAFE_API_KEY is not set");
       return new TypeSafeProvider(tsKey);
+    case "vercel-gateway":
+      if (!gwKey) throw new Error("JEV_PROVIDER=vercel-gateway but AI_GATEWAY_API_KEY is not set");
+      return new VercelGatewayProvider(gwKey);
     case "mock":
       return new MockProvider();
     case "auto": {
+      // Gateway first while Jev is in its free promo window there; explicit
+      // JEV_PROVIDER overrides for anyone who wants a different order.
+      if (gwKey) return new VercelGatewayProvider(gwKey);
       if (orKey) return new OpenRouterProvider(orKey);
       if (tsKey) return new TypeSafeProvider(tsKey);
       if (opts.warnOnMock !== false) {
@@ -77,7 +87,9 @@ function resolveProvider(opts: JevClientOptions): Provider {
       return new MockProvider();
     }
     default:
-      throw new Error(`Unknown JEV_PROVIDER "${choice}" (expected openrouter|typesafe|mock)`);
+      throw new Error(
+        `Unknown JEV_PROVIDER "${choice}" (expected openrouter|typesafe|vercel-gateway|mock)`,
+      );
   }
 }
 

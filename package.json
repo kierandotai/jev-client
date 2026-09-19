@@ -3,9 +3,18 @@
   "version": "0.1.0",
   "description": "Lightweight client for TypeSafe Jev (System One decision model) via OpenRouter Decisions API or TypeSafe direct",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "engines": { "node": ">=22.18" },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "proxy": "node --experimental-strip-types server/proxy.ts",
