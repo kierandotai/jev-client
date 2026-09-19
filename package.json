@@ -1,0 +1,20 @@
+{
+  "name": "jev-client",
+  "version": "0.1.0",
+  "description": "Lightweight client for TypeSafe Jev (System One decision model) via OpenRouter Decisions API or TypeSafe direct",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "proxy": "node --experimental-strip-types server/proxy.ts",
+    "example:triage": "node --experimental-strip-types examples/support-triage.ts",
+    "example:gating": "node --experimental-strip-types examples/tool-gating.ts",
+    "example:fanout": "node --experimental-strip-types examples/fanout.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  }
+}
